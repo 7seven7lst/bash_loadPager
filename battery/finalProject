@@ -1,0 +1,251 @@
+#!/bin/bash
+######################################################################################################################################################################
+# PCC CS 018 Final Project
+# Norman Shengtao Li
+# 05-09-2014
+# This program will validate service status from Mouser website, and then acquire 50 battery entries from Mouser, including the product category, manufacturer, part#, description, lead time, datasheet link, and description page. The program will parse and extract relavent info between the xml tag, and format them accordingly. It stores the extracted data into database. The program then select relavent info from database. Finally the program save the database to a csv file for further study.
+#
+######################################################################################################################################################################
+myPath=$(pwd) # get current path
+continueLoop="y"
+touch serviceStatus.txt      # create serviceStatus.txt
+touch batteryResult.txt
+touch batteryResultFormatted.txt
+while [ "$continueLoop" == "y" ]; do # while want to continue loop because service connection is unsuccessful want to retry, or if it's 1st run 
+curl -H "Content-Type: text/xml; charset=utf-8" \
+-H "SOAPAction:" \
+-d @checkServiceStatus.txt -X POST http://api.mouser.com/service/searchapi.asmx > serviceStatus.txt # acquire the service status response and store into file
+
+if grep "<ServiceStatusResult>true</ServiceStatusResult>" serviceStatus.txt > /dev/null # if servie status result is true, which means service available
+then
+continueLoop="n" # run through 1st cycle and exit the while loop
+echo " "
+echo "*********************************************************************"
+echo "Connection to service successul, and will proceed to acquire data :)*"
+echo "*********************************************************************"
+echo " "
+
+curl -H "Content-Type: text/xml; charset=utf-8" \
+-H "SOAPAction:" \
+-d @searchByKeyword.txt -X POST http://api.mouser.com/service/searchapi.asmx > batteryResult.txt # acquire the 50 battery entry from keyword search
+cat batteryResult.txt | tr "><" ">\n<" >> batteryResultFormatted.txt # separate each xml tag into a new line
+
+mysqladmin -h localhost -u root -ppassword create normDB2 # create database
+mysql -h localhost -u root -ppassword <<EOF
+use normDB2;
+create table battery(Category char(50),LeadTime char(5),Manufacturer char(50),ManufacturerPartNumber char(20),DataSheetUrl char(250),ProductDetailUrl char(250),Description char(200));
+EOF
+
+
+filesize=`cat batteryResultFormatted.txt | wc -l` # count the line number of file
+matchedRecordCategory=0   # initialize parameters
+matchedRecordLeadTime=0
+matchedRecordManufacturer=0
+matchedRecordManufacturerPartNumber=0
+matchedRecrodDataSheetUrl=0
+matachedRecordProductDetailUrl=0
+matchedRecordDescription=0
+
+
+echo $filesize
+for i in `seq 1 ${filesize}` # from 1st line to last line
+do 
+#Category
+matchPattern=`head -${i} batteryResultFormatted.txt | tail -1 | grep -F "Category"` # scan for keyword "Category"
+if test "$matchPattern" != "" # if matches
+then 
+refinedMatchPattern=`head -${i} batteryResultFormatted.txt | tail -1 | grep -F "Category" | grep -Fv "/"`
+if test "$refinedMatchPattern" != ""
+then 
+if [[ $refinedMatchPattern == *amp* ]]
+then
+refinedMatchPattern=`echo ${refinedMatchPattern:9} | tr "&" " " | tr ";" " "` # store modified info into array
+else
+refinedMatchPattern=`echo ${refinedMatchPattern:9}`
+fi
+Category[$matchedRecordCategory]=`echo $refinedMatchPattern`
+echo "Category: " ${Category[matchedRecordCategory]} # print the info on screen
+((matchedRecordCategory++))
+fi
+fi
+
+# LeadTime
+matchPattern=`head -${i} batteryResultFormatted.txt | tail -1 | grep -F "LeadTime"` # scan for keyword "LeadTime"
+if test "$matchPattern" != ""
+then 
+refinedMatchPattern=`head -${i} batteryResultFormatted.txt | tail -1 | grep -F "LeadTime" | grep -Fv "/"` 
+if test "$refinedMatchPattern" != ""
+then 
+refinedMatchPattern=`echo ${refinedMatchPattern:9:3} | tr "D" " "` # store modified info into array
+LeadTime[$matchedRecordLeadTime]=`echo $refinedMatchPattern`
+echo "LeadTime: " ${LeadTime[matchedRecordLeadTime]}
+((matchedRecordLeadTime++))
+fi
+fi
+
+#Manufacturer
+matchPattern=`head -${i} batteryResultFormatted.txt | tail -1 | grep -F "Manufacturer"` # scan for keyword "Manufacturer"
+if test "$matchPattern" != ""
+then 
+refinedMatchPattern=`head -${i} batteryResultFormatted.txt | tail -1 | grep -F "Manufacturer" | grep -Fv "/" | grep -Fv "PartNumber"`
+if test "$refinedMatchPattern" != ""
+then 
+refinedMatchPattern=`echo ${refinedMatchPattern:13} | tr "\"" "i"` # store modified info into array
+Manufacturer[$matchedRecordManufacturer]=`echo $refinedMatchPattern`
+echo "Manufacturer: " ${Manufacturer[matchedManufacturer]}
+((matchedRecordManufacturer++))
+fi
+fi
+
+
+#ManufacturerPartNumber
+matchPattern=`head -${i} batteryResultFormatted.txt | tail -1 | grep -F "ManufacturerPartNumber"` # scan for keyword "ManufacturerPartNumber"
+if test "$matchPattern" != ""
+then 
+refinedMatchPattern=`head -${i} batteryResultFormatted.txt | tail -1 | grep -F "ManufacturerPartNumber" | grep -Fv "/M"` 
+if test "$refinedMatchPattern" != ""
+then 
+refinedMatchPattern=`echo ${refinedMatchPattern:23} | tr "\"" "i"` # store modified info into array
+ManufacturerPartNumber[$matchedRecordManufacturerPartNumber]=`echo $refinedMatchPattern`
+echo "ManufacturerPartNumber: " ${ManufacturerPartNumber[matchedRecordManufacturerPartNumber]}
+((matchedRecordManufacturerPartNumber++))
+
+fi
+fi
+
+#DataSheetUrl
+matchPattern=`head -${i} batteryResultFormatted.txt | tail -1 | grep -F "DataSheetUrl"` # scan for keyword "DataSheetUrl"
+if test "$matchPattern" != ""
+then 
+refinedMatchPattern=`head -${i} batteryResultFormatted.txt | tail -1 | grep -F "DataSheetUrl>" | grep -Fv "/DataSheetUrl>" | grep -Fv "DataSheetUrl />"`
+if test "$refinedMatchPattern" != ""
+then 
+refinedMatchPattern=`echo ${refinedMatchPattern:13} | tr "\"" "i"` # store modified info into array
+DataSheetUrl[$matchedRecordDataSheetUrl]=`echo $refinedMatchPattern`
+echo "DataSheetUrl: " ${DataSheetUrl[matchedRecordDataSheetUrl]}
+((matchedRecordDataSheetUrl++))
+
+fi
+fi
+
+#ProductDetailUrl
+matchPattern=`head -${i} batteryResultFormatted.txt | tail -1 | grep -F "ProductDetailUrl"` #scan for keyword "ProductDetailUrl"
+if test "$matchPattern" != ""
+then 
+refinedMatchPattern=`head -${i} batteryResultFormatted.txt | tail -1 | grep -F "ProductDetailUrl" | grep -Fv "/ProductDetailUrl>"` 
+if test "$refinedMatchPattern" != ""
+then 
+refinedMatchPattern=`echo ${refinedMatchPattern:17} | tr "\"" "i"` # store modified info into array
+ProductDetailUrl[$matchedRecordProductDetailUrl]=`echo $refinedMatchPattern`
+echo "ProductDetialUrl: " ${ProductDetailUrl[matchedRecordProductDetailUrl]}
+echo " "
+echo "*******************"
+echo "*New Battery Entry*"
+echo "*******************"
+echo " "
+((matchedRecordProductDetailUrl++))
+fi
+fi
+
+#Description
+matchPattern=`head -${i} batteryResultFormatted.txt | tail -1 | grep -F "Description"` #scan for keyword "Description"
+if test "$matchPattern" != ""
+then 
+refinedMatchPattern=`head -${i} batteryResultFormatted.txt | tail -1 | grep -F "Description" | grep -Fv "/Description>"` 
+if test "$refinedMatchPattern" != ""
+then 
+refinedMatchPattern=`echo ${refinedMatchPattern:12} | tr "\"" "i" | tr "&" " " | tr ";" " "` # store modified info into array
+Description[$matchedRecordDescription]=`echo $refinedMatchPattern`
+echo "Description: " ${Description[matchedRecordDescription]}
+((matchedRecordDescription++))
+
+fi
+fi
+done
+
+for i in {0..49} # store the array of battery info into database
+do
+mysql -h localhost -u root -ppassword <<EOF
+use normDB2;
+INSERT INTO battery VALUES ('${Category[i]}','${LeadTime[i]}','${Manufacturer[i]}','${ManufacturerPartNumber[i]}','${DataSheetUrl[i]}','${ProductDetailUrl[i]}','${Description[i]}');
+EOF
+done
+
+echo " "
+echo "***************************************************************************"
+echo "************************Database Display***********************************"
+echo "SELECT Category,LeadTime,Manufacturer,ManufacturerPartNumber,Description FROM battery;" | mysql -h localhost -u root -ppassword -t normDB2; # display database
+echo "***************************************************************************"
+echo " "
+
+selectID="Category"
+while [ "$selectID" != "q" ]; do # make a selection on database and display
+echo "Please enter the selection (Category, LeadTime, Manufacturer, ManufacturerPartNumber) you want to see, q to quit: " # selection category selection
+read selectID
+
+case "$selectID" in
+Category) echo "Please enter the Category you want to see: ";
+	  read selectInput;
+	  echo "SELECT Category,LeadTime,Manufacturer,ManufacturerPartNumber FROM battery WHERE Category='${selectInput}';" | mysql -h localhost -u root -ppassword -t normDB2;;
+LeadTime) echo "Please enter the LeadTime you want to see: ";
+	  read selectInput;
+	  echo "SELECT Category,LeadTime,Manufacturer,ManufacturerPartNumber FROM battery WHERE LeadTime='${selectInput}';" | mysql -h localhost -u root -ppassword -t normDB2;;
+Manufacturer) echo "Please enter the Manufacturer you want to see: ";
+	  read selectInput;
+	  echo "SELECT Category,LeadTime,Manufacturer,ManufacturerPartNumber FROM battery WHERE Manufacturer='${selectInput}';" | mysql -h localhost -u root -ppassword -t normDB2;;
+ManufacturerPartNumber) echo "Please enter the ManufacturerPartNumber you want to see: ";
+	  read selectInput;
+	  echo "SELECT Category,LeadTime,Manufacturer,ManufacturerPartNumber FROM battery WHERE ManufacturerPartNumber='${selectInput}';" | mysql -h localhost -u root -ppassword -t normDB2;;
+
+q) selectID="q";              # if user want to quit displaying database
+   echo "Quit selecting database...";
+   echo " ";;
+*) echo "Wrong Selection, Please select again";; # if selection doesn't match any column name
+esac
+done
+	  
+
+
+
+mysqldump -h localhost -u root -ppassword -T/tmp/ normDB2 battery --fields-terminated-by="," --fields-enclosed-by=\";  
+touch batteryCSV.csv
+cp /tmp/battery.txt $(pwd)/batteryCSV.csv # save database to a csv file
+
+
+# delete redundent files
+rm -f $(pwd)/batteryResult.txt
+rm -f $(pwd)/batteryResultFormatted.txt
+rm -f $(pwd)/serviceStatus.txt
+
+echo " "
+echo "********************************************************"
+echo "******************Deleting Database*********************"
+echo "********************************************************"
+echo " "
+
+echo " "
+echo "********************************************************"
+echo "***************Result is stored in**********************"
+echo "***************batteryCSV.csv***************************"
+echo "********************************************************"
+echo " "
+
+# delete database
+mysql -h localhost -u root -ppassword <<EOF
+DROP DATABASE normDB2;
+EOF
+sudo rm -f /tmp/battery.txt
+
+else  # if service result is false, which means service not available
+echo "Connection to service failed. Service is not available, please retry :("
+echo "Do you want to retry?[Y/N] "
+read text
+if test "$text" == "y" -o "$text" == "Y"
+then
+continueLoop="y" # if user want to retry, then retry
+else
+continueLoop="n" # if user doesn't, exit
+fi # end if the $text if y or Y
+fi # end if the service is or is not available
+done   # end while loop
+

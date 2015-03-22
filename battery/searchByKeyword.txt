@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Header>
+    <MouserHeader xmlns="http://api.mouser.com/service">
+      <AccountInfo>
+        <PartnerID>ENTER_YOUR_PARTNER_ID</PartnerID>
+      </AccountInfo>
+    </MouserHeader>
+  </soap:Header>
+  <soap:Body>
+    <SearchByKeyword xmlns="http://api.mouser.com/service">
+      <keyword>batteries</keyword>
+      <records>50</records>
+      <startingRecord>1</startingRecord>
+      <searchOptions>None</searchOptions>
+    </SearchByKeyword>
+  </soap:Body>
+</soap:Envelope>
